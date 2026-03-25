@@ -43,7 +43,8 @@ async def router_node(state: DocIntelState) -> DocIntelState:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Query: {query}"}
             ],
-            temperature=0
+            temperature=0,
+            api_base=LITELLM_PROXY_URL
         )
         
         intent = response.choices[0].message.content.strip().lower()
@@ -67,7 +68,5 @@ async def router_node(state: DocIntelState) -> DocIntelState:
         print(f"Error in router_node: {e}")
         intent = "qa"
         
-    # Create a new state dictionary to be safe (LangGraph state is usually immutable/updated via dict merge)
-    new_state = state.copy()
-    new_state["intent"] = intent
-    return new_state
+    # Return the updated state as a partial dictionary (LangGraph will merge)
+    return {"intent": intent}

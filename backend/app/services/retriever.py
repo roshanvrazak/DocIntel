@@ -138,7 +138,7 @@ class HybridRetriever:
             logger.error(f"Error during re-ranking: {str(e)}")
             return results[:top_n]
 
-    async def dense_search(self, query_embedding: List[float], top_k: int = 10) -> List[Dict[str, Any]]:
+    async def dense_search(self, query_embedding: List[float], top_k: int = 10, document_ids: Optional[List[uuid.UUID]] = None) -> List[Dict[str, Any]]:
         """
         Perform dense vector search using cosine similarity.
         """
@@ -151,11 +151,15 @@ class HybridRetriever:
             .order_by(distance_expr)
             .limit(top_k)
         )
+        
+        if document_ids:
+            stmt = stmt.where(Chunk.document_id.in_(document_ids))
+            
         result = await self.session.execute(stmt)
         # Using a list comprehension to unpack the Row objects
         return [{"chunk": row[0], "score": float(row[1])} for row in result.all()]
 
-    async def sparse_search(self, query_text: str, top_k: int = 10) -> List[Dict[str, Any]]:
+    async def sparse_search(self, query_text: str, top_k: int = 10, document_ids: Optional[List[uuid.UUID]] = None) -> List[Dict[str, Any]]:
         """
         Perform sparse keyword search using PostgreSQL full-text search.
         """
@@ -168,6 +172,10 @@ class HybridRetriever:
             .order_by(score_expr.desc())
             .limit(top_k)
         )
+        
+        if document_ids:
+            stmt = stmt.where(Chunk.document_id.in_(document_ids))
+            
         result = await self.session.execute(stmt)
         return [{"chunk": row[0], "score": float(row[1])} for row in result.all()]
 
@@ -175,7 +183,8 @@ class HybridRetriever:
         self, 
         query_text: str, 
         top_k: int = 5, 
-        rrf_k: int = 60
+        rrf_k: int = 60,
+        document_ids: Optional[List[uuid.UUID]] = None
     ) -> List[Dict[str, Any]]:
         """
         Perform multi-query hybrid search:
@@ -192,7 +201,7 @@ class HybridRetriever:
         
         # 3. Start all sparse searches in parallel
         sparse_tasks = [
-            asyncio.create_task(self.sparse_search(q, top_k=20)) 
+            asyncio.create_task(self.sparse_search(q, top_k=20, document_ids=document_ids)) 
             for q in queries
         ]
         
@@ -200,7 +209,7 @@ class HybridRetriever:
         
         # 4. Start all dense searches in parallel (once embeddings are ready)
         dense_tasks = [
-            asyncio.create_task(self.dense_search(emb, top_k=20)) 
+            asyncio.create_task(self.dense_search(emb, top_k=20, document_ids=document_ids)) 
             for emb in embeddings
         ]
         

@@ -2,43 +2,27 @@ from typing import Literal
 from langgraph.graph import StateGraph, END
 from .state import DocIntelState
 from .router import router_node
-
-async def rag_agent(state: DocIntelState) -> DocIntelState:
-    """
-    RAG-based Question Answering. 
-    (Placeholder - implemented in Task 3)
-    """
-    return state
-
-async def summarise_agent(state: DocIntelState) -> DocIntelState:
-    """
-    Summarization (Map-Reduce).
-    (Placeholder - implemented in Task 3)
-    """
-    return state
-
-async def compare_agent(state: DocIntelState) -> DocIntelState:
-    """
-    Cross-document comparison.
-    (Placeholder - implemented in Task 3)
-    """
-    return state
+from .rag_agent import rag_node
+from .summarise_agent import summarise_node
+from .compare_agent import compare_node
 
 async def validator(state: DocIntelState) -> DocIntelState:
     """
     Validates the response for faithfulness and relevance.
     Placeholder implementation.
     """
-    return state
+    retry_count = state.get("retry_count", 0) + 1
+    # Mock a high faithfulness score for now to avoid retries in placeholder mode
+    return {"faithfulness_score": 0.9, "retry_count": retry_count}
 
 # Initialize the StateGraph with DocIntelState
 workflow = StateGraph(DocIntelState)
 
 # Add nodes to the graph
 workflow.add_node("router", router_node)
-workflow.add_node("rag_agent", rag_agent)
-workflow.add_node("summarise_agent", summarise_agent)
-workflow.add_node("compare_agent", compare_agent)
+workflow.add_node("rag_agent", rag_node)
+workflow.add_node("summarise_agent", summarise_node)
+workflow.add_node("compare_agent", compare_node)
 workflow.add_node("validator", validator)
 
 # Set the entry point
