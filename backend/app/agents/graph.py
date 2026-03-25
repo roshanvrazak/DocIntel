@@ -1,19 +1,11 @@
-from typing import Literal
+from typing import Literal, Union
 from langgraph.graph import StateGraph, END
 from .state import DocIntelState
 from .router import router_node
 from .rag_agent import rag_node
 from .summarise_agent import summarise_node
 from .compare_agent import compare_node
-
-async def validator(state: DocIntelState) -> DocIntelState:
-    """
-    Validates the response for faithfulness and relevance.
-    Placeholder implementation.
-    """
-    retry_count = state.get("retry_count", 0) + 1
-    # Mock a high faithfulness score for now to avoid retries in placeholder mode
-    return {"faithfulness_score": 0.9, "retry_count": retry_count}
+from .validator import validator_node
 
 # Initialize the StateGraph with DocIntelState
 workflow = StateGraph(DocIntelState)
@@ -23,7 +15,7 @@ workflow.add_node("router", router_node)
 workflow.add_node("rag_agent", rag_node)
 workflow.add_node("summarise_agent", summarise_node)
 workflow.add_node("compare_agent", compare_node)
-workflow.add_node("validator", validator)
+workflow.add_node("validator", validator_node)
 
 # Set the entry point
 workflow.set_entry_point("router")
@@ -57,27 +49,26 @@ workflow.add_edge("summarise_agent", "validator")
 workflow.add_edge("compare_agent", "validator")
 
 # Define conditional edge for self-correction loop from validator
-def should_retry(state: DocIntelState) -> Literal["router", "__end__"]:
+def should_retry(state: DocIntelState) -> bool:
     """
     Determines if the flow should retry based on the validation score.
-    In the new graph, we retry from the router to allow re-classification or refined queries.
+    Returns True if a retry is needed, False otherwise.
     """
     score = state.get("faithfulness_score", 0)
     retry_count = state.get("retry_count", 0)
     
-    # If score is high enough or we reached max retries, end the process
-    if (score and score > 0.8) or retry_count >= 3:
-        return END
+    # Retry if score is low and we haven't reached max retries
+    if (score and score < 0.8) and retry_count < 3:
+        return True
     
-    # Otherwise, try from the beginning (could be more sophisticated in future)
-    return "router"
+    return False
 
 workflow.add_conditional_edges(
     "validator",
     should_retry,
     {
-        "router": "router",
-        END: END
+        True: "router",
+        False: END
     }
 )
 
