@@ -1,0 +1,20 @@
+[project]
+name = "docintel-backend"
+version = "0.1.0"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]",
+    "sqlalchemy>=2.0",
+    "asyncpg",
+    "psycopg2-binary",
+    "pgvector",
+    "pydantic-settings",
+    "celery[redis]",
+    "pymupdf",
+    "python-multipart",
+    "litellm",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
