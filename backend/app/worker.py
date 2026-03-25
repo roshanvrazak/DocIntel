@@ -64,8 +64,13 @@ def process_document(self, doc_id: str):
             db.commit()
             publish_status(doc_id, "embedding", 75)
             
-            embeddings = generate_embeddings(chunk_texts)
-            publish_status(doc_id, "embedding", 90)
+            def embedding_progress(current, total):
+                # Scale progress between 75 and 90
+                # total should be chunk_texts len
+                progress = 75 + int((current / total) * (90 - 75))
+                publish_status(doc_id, f"embedding: {current}/{total}", progress)
+
+            embeddings = generate_embeddings(chunk_texts, progress_callback=embedding_progress)
 
             # Save chunks to DB (using bulk add for performance)
             db_chunks = [
