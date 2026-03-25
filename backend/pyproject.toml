@@ -18,6 +18,12 @@ dependencies = [
     "pymupdf",
     "python-multipart",
     "litellm",
+    "langchain-litellm",
+    "langchain>=0.3",
+    "langgraph>=0.2",
+    "langchain-experimental",
+    "langchain-community",
+    "pytest",
 ]
 
 [build-system]
