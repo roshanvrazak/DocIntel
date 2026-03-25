@@ -1,6 +1,11 @@
 [project]
 name = "docintel-backend"
 version = "0.1.0"
+description = "Intelligent Document Analysis and Processing Backend"
+authors = [
+    {name = "DocIntel Team", email = "team@docintel.ai"},
+]
+urls = {repository = "https://github.com/docintel/docintel"}
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]",
