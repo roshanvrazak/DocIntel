@@ -54,11 +54,12 @@ def should_retry(state: DocIntelState) -> bool:
     Determines if the flow should retry based on the validation score.
     Returns True if a retry is needed, False otherwise.
     """
-    score = state.get("faithfulness_score", 0)
+    score = state.get("faithfulness_score")
     retry_count = state.get("retry_count", 0)
     
     # Retry if score is low and we haven't reached max retries
-    if (score and score < 0.8) and retry_count < 3:
+    # Note: score can be 0.0, so we check if it is not None
+    if score is not None and score < 0.8 and retry_count < 3:
         return True
     
     return False

@@ -26,20 +26,47 @@ async def compare_node(state: DocIntelState) -> DocIntelState:
         return {"draft_response": "No documents provided for comparison."}
     
     try:
-        # Fetch content for the documents
+        # Fetch content for the documents in batch
         all_docs_content = []
         async with async_session() as session:
+            # Batch fetch document metadata
+            doc_meta_stmt = select(Document).where(Document.id.in_(doc_ids))
+            doc_meta_result = await session.execute(doc_meta_stmt)
+            doc_metas = {doc.id: doc for doc in doc_meta_result.scalars().all()}
+            
+            # Fetch chunks for all docs (limit to avoid excessive context if many huge docs)
+            # Using a simplified batch approach: fetch top 100 chunks for each doc in a more efficient way if possible,
+            # but for now, even a single query for all chunks of these docs is better than N queries.
+            chunk_stmt = select(Chunk).where(Chunk.document_id.in_(doc_ids)).order_by(Chunk.document_id, Chunk.page_number, Chunk.id)
+            chunk_result = await session.execute(chunk_stmt)
+            all_chunks = chunk_result.scalars().all()
+            
+            # Group chunks by document_id and limit to 100 per doc
+            doc_chunks = {}
+            for chunk in all_chunks:
+                if chunk.document_id not in doc_chunks:
+                    doc_chunks[chunk.document_id] = []
+                if len(doc_chunks[chunk.document_id]) < 100:
+                    doc_chunks[chunk.document_id].append(chunk.content)
+            
             for doc_id in doc_ids:
-                doc_meta = await session.get(Document, doc_id)
-                filename = doc_meta.filename if doc_meta else str(doc_id)
-                
-                # Fetch all chunks (limit slightly if many)
-                stmt = select(Chunk).where(Chunk.document_id == doc_id).order_by(Chunk.page_number, Chunk.id).limit(100)
-                result = await session.execute(stmt)
-                chunks = result.scalars().all()
-                doc_content = "\n".join([c.content for c in chunks])
-                all_docs_content.append({"id": doc_id, "filename": filename, "content": doc_content})
+                filename = doc_metas[doc_id].filename if doc_id in doc_metas else str(doc_id)
+                content = "\n".join(doc_chunks.get(doc_id, []))
+                all_docs_content.append({"id": doc_id, "filename": filename, "content": content})
         
+        # Populate retrieved_chunks for validation (take a sample to avoid overloading)
+        retrieved_chunks = []
+        for doc in all_docs_content:
+            # Add up to 10 chunks per document to retrieved_chunks for the validator
+            chunks = doc["content"].split("\n")[:10]
+            for i, c in enumerate(chunks):
+                if c.strip():
+                    retrieved_chunks.append({
+                        "content": c,
+                        "document_id": str(doc["id"]),
+                        "filename": doc["filename"]
+                    })
+
         combined_docs = "\n\n".join([f"--- Document: {d['filename']} ---\n{d['content']}" for d in all_docs_content])
         
         system_prompt = """
@@ -64,7 +91,10 @@ async def compare_node(state: DocIntelState) -> DocIntelState:
         )
         
         comparison = response.choices[0].message.content
-        return {"draft_response": comparison}
+        return {
+            "draft_response": comparison,
+            "retrieved_chunks": retrieved_chunks
+        }
         
     except Exception as e:
         logger.error(f"Error in compare_node: {str(e)}")

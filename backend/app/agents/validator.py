@@ -1,6 +1,7 @@
 import os
 import litellm
 import logging
+import re
 from .state import DocIntelState
 
 # Point to LiteLLM Proxy if available
@@ -48,10 +49,17 @@ async def validator_node(state: DocIntelState) -> DocIntelState:
         )
         
         score_text = response.choices[0].message.content.strip()
-        try:
-            faithfulness_score = float(score_text)
-        except ValueError:
-            logger.error(f"Failed to parse faithfulness score: {score_text}")
+        
+        # Robust parsing using regex to find the first numeric value
+        match = re.search(r"(\d+(\.\d+)?)", score_text)
+        if match:
+            try:
+                faithfulness_score = float(match.group(1))
+            except ValueError:
+                logger.error(f"Regex matched but float conversion failed for: {match.group(1)}")
+                faithfulness_score = 0.5
+        else:
+            logger.error(f"Failed to find numeric faithfulness score in response: {score_text}")
             faithfulness_score = 0.5 # Default to mid-point on parse error
             
     except Exception as e:
@@ -61,7 +69,8 @@ async def validator_node(state: DocIntelState) -> DocIntelState:
     # Increment retry count for the NEXT potential run
     new_retry_count = retry_count + 1
     
-    final_response = draft_response if faithfulness_score > 0.8 else None
+    # Consistent threshold: pass if score is 0.8 or higher
+    final_response = draft_response if faithfulness_score >= 0.8 else None
     
     return {
         "faithfulness_score": faithfulness_score,

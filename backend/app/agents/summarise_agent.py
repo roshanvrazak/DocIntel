@@ -1,5 +1,6 @@
 import os
 import litellm
+import asyncio
 import logging
 from typing import List, Dict, Any
 from sqlalchemy import select
@@ -26,40 +27,62 @@ async def summarise_node(state: DocIntelState) -> DocIntelState:
         return {"draft_response": "No documents provided for summarization."}
     
     try:
-        # Fetch content for the documents
+        # Fetch content for the documents in batch
         all_docs_content = []
         async with async_session() as session:
+            # Batch fetch document metadata
+            doc_meta_stmt = select(Document).where(Document.id.in_(doc_ids))
+            doc_meta_result = await session.execute(doc_meta_stmt)
+            doc_metas = {doc.id: doc for doc in doc_meta_result.scalars().all()}
+            
+            # Batch fetch all chunks for all documents
+            chunk_stmt = select(Chunk).where(Chunk.document_id.in_(doc_ids)).order_by(Chunk.document_id, Chunk.page_number, Chunk.id)
+            chunk_result = await session.execute(chunk_stmt)
+            all_chunks = chunk_result.scalars().all()
+            
+            # Group chunks by document_id
+            doc_chunks = {}
+            for chunk in all_chunks:
+                if chunk.document_id not in doc_chunks:
+                    doc_chunks[chunk.document_id] = []
+                doc_chunks[chunk.document_id].append(chunk.content)
+            
             for doc_id in doc_ids:
-                # Fetch filename for better identification
-                doc_meta = await session.get(Document, doc_id)
-                filename = doc_meta.filename if doc_meta else str(doc_id)
-                
-                # Fetch all chunks
-                stmt = select(Chunk).where(Chunk.document_id == doc_id).order_by(Chunk.page_number, Chunk.id)
-                result = await session.execute(stmt)
-                chunks = result.scalars().all()
-                doc_content = "\n".join([c.content for c in chunks])
-                all_docs_content.append({"id": doc_id, "filename": filename, "content": doc_content})
+                filename = doc_metas[doc_id].filename if doc_id in doc_metas else str(doc_id)
+                content = "\n".join(doc_chunks.get(doc_id, []))
+                all_docs_content.append({"id": doc_id, "filename": filename, "content": content})
         
+        # Populate retrieved_chunks for validation (take a sample to avoid overloading)
+        retrieved_chunks = []
+        for doc in all_docs_content:
+            # Add up to 10 chunks per document to retrieved_chunks for the validator
+            chunks = doc["content"].split("\n")[:10]
+            for i, c in enumerate(chunks):
+                if c.strip():
+                    retrieved_chunks.append({
+                        "content": c,
+                        "document_id": str(doc["id"]),
+                        "filename": doc["filename"]
+                    })
+
         if intent == "summarise_each":
-            # Summarize each document individually
-            summaries = []
-            for doc in all_docs_content:
-                prompt = f"Provide a detailed and concise summary of the following document:\n\nDocument Name: {doc['filename']}\nContent: {doc['content']}"
+            # Summarize each document individually in parallel
+            async def get_summary(doc):
+                prompt = f"Provide a comprehensive summary of the following document, highlighting its main purpose, key findings, and significant takeaways:\n\nDocument Name: {doc['filename']}\nContent: {doc['content']}"
                 response = await litellm.acompletion(
                     model="gemini/gemini-1.5-pro",
                     messages=[{"role": "user", "content": prompt}],
                     api_base=LITELLM_PROXY_URL,
                     temperature=0.3
                 )
-                summaries.append(f"### Summary of {doc['filename']}:\n{response.choices[0].message.content}")
+                return f"### Summary of {doc['filename']}:\n{response.choices[0].message.content}"
             
+            tasks = [get_summary(doc) for doc in all_docs_content]
+            summaries = await asyncio.gather(*tasks)
             final_summary = "\n\n---\n\n".join(summaries)
             
         else:
             # Combined summary (Simplified Map-Reduce)
-            # For Gemini 1.5 Pro, we can often send quite a lot. 
-            # If documents are huge, we'd need a more complex recursive map-reduce.
             combined_content = "\n\n".join([f"--- Document: {d['filename']} ---\n{d['content']}" for d in all_docs_content])
             
             prompt = f"""
@@ -78,8 +101,11 @@ async def summarise_node(state: DocIntelState) -> DocIntelState:
             )
             final_summary = response.choices[0].message.content
             
-        return {"draft_response": final_summary}
+        return {
+            "draft_response": final_summary,
+            "retrieved_chunks": retrieved_chunks
+        }
         
     except Exception as e:
-        logger.error(f"Error in summarise_node: {str(e)}")
+        logger.error(f"Error in summarise_node: {str(e)}", exc_info=True)
         return {"draft_response": f"I encountered an error while summarizing the documents: {str(e)}"}

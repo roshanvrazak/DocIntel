@@ -1,9 +1,12 @@
 import os
 import litellm
+import logging
 from .state import DocIntelState
 
 # Point to LiteLLM Proxy if available, otherwise use direct
 LITELLM_PROXY_URL = os.getenv("LITELLM_PROXY_URL", "http://litellm:4000")
+
+logger = logging.getLogger(__name__)
 
 async def router_node(state: DocIntelState) -> DocIntelState:
     """
@@ -30,13 +33,6 @@ async def router_node(state: DocIntelState) -> DocIntelState:
     
     try:
         # Use LiteLLM with Gemini 1.5 Flash
-        # We pass api_base if LITELLM_PROXY_URL is set, but for Gemini it might be direct
-        # However, the project seems to prefer the proxy for other models.
-        # If LITELLM_PROXY_URL is used, it should be configured to handle gemini/gemini-1.5-flash
-        
-        # For now, we'll try to use the proxy if it looks like it's configured for it,
-        # but LiteLLM usually handles Gemini directly if API key is in ENV.
-        
         response = await litellm.acompletion(
             model="gemini/gemini-1.5-flash",
             messages=[
@@ -64,8 +60,7 @@ async def router_node(state: DocIntelState) -> DocIntelState:
                 intent = "qa"
             
     except Exception as e:
-        # Log error or print (consider using a logger)
-        print(f"Error in router_node: {e}")
+        logger.error(f"Error in router_node: {e}")
         intent = "qa"
         
     # Return the updated state as a partial dictionary (LangGraph will merge)
