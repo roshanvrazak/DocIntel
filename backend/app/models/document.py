@@ -1,9 +1,9 @@
 import uuid
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Any
 
-from sqlalchemy import ForeignKey, String, Text, Integer, DateTime
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import ForeignKey, String, Text, Integer, DateTime, Computed, Index
+from sqlalchemy.dialects.postgresql import UUID, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
@@ -31,5 +31,18 @@ class Chunk(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     page_number: Mapped[int] = mapped_column(Integer, nullable=True)
     embedding: Mapped[Vector] = mapped_column(Vector(768), nullable=True)
+    search_vector: Mapped[Any] = mapped_column(
+        TSVECTOR, Computed("to_tsvector('english', content)", persisted=True)
+    )
 
     document: Mapped["Document"] = relationship("Document", back_populates="chunks")
+
+    __table_args__ = (
+        Index(
+            "idx_chunk_embedding",
+            embedding,
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
