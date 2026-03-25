@@ -1,31 +1,32 @@
 from typing import Literal
 from langgraph.graph import StateGraph, END
 from .state import DocIntelState
+from .router import router_node
 
-async def router(state: DocIntelState) -> DocIntelState:
+async def rag_agent(state: DocIntelState) -> DocIntelState:
     """
-    Classifies the user's intent (e.g., summarise, compare, qa).
-    Placeholder implementation.
+    RAG-based Question Answering. 
+    (Placeholder - implemented in Task 3)
     """
     return state
 
-async def retriever(state: DocIntelState) -> DocIntelState:
+async def summarise_agent(state: DocIntelState) -> DocIntelState:
     """
-    Retrieves relevant document chunks based on the query and intent.
-    Placeholder implementation.
+    Summarization (Map-Reduce).
+    (Placeholder - implemented in Task 3)
     """
     return state
 
-async def generator(state: DocIntelState) -> DocIntelState:
+async def compare_agent(state: DocIntelState) -> DocIntelState:
     """
-    Generates a draft response using the retrieved chunks.
-    Placeholder implementation.
+    Cross-document comparison.
+    (Placeholder - implemented in Task 3)
     """
     return state
 
 async def validator(state: DocIntelState) -> DocIntelState:
     """
-    Validates the draft response for faithfulness and relevance.
+    Validates the response for faithfulness and relevance.
     Placeholder implementation.
     """
     return state
@@ -34,23 +35,48 @@ async def validator(state: DocIntelState) -> DocIntelState:
 workflow = StateGraph(DocIntelState)
 
 # Add nodes to the graph
-workflow.add_node("router", router)
-workflow.add_node("retriever", retriever)
-workflow.add_node("generator", generator)
+workflow.add_node("router", router_node)
+workflow.add_node("rag_agent", rag_agent)
+workflow.add_node("summarise_agent", summarise_agent)
+workflow.add_node("compare_agent", compare_agent)
 workflow.add_node("validator", validator)
 
 # Set the entry point
 workflow.set_entry_point("router")
 
-# Define simple linear edges
-workflow.add_edge("router", "retriever")
-workflow.add_edge("retriever", "generator")
-workflow.add_edge("generator", "validator")
-
-# Define conditional edge for self-correction loop
-def should_retry(state: DocIntelState) -> Literal["retriever", "__end__"]:
+# Define conditional edges from router based on intent
+def route_intent(state: DocIntelState) -> Literal["rag_agent", "summarise_agent", "compare_agent"]:
     """
-    Determines if the generator should retry based on the validation score.
+    Routes the workflow to specialized agents based on classified intent.
+    """
+    intent = state.get("intent", "qa")
+    if intent in ["summarise", "summarise_each"]:
+        return "summarise_agent"
+    elif intent in ["compare", "contradict"]:
+        return "compare_agent"
+    # Default to RAG for QA, extract, action_items, timeline, etc. for now
+    return "rag_agent"
+
+workflow.add_conditional_edges(
+    "router",
+    route_intent,
+    {
+        "rag_agent": "rag_agent",
+        "summarise_agent": "summarise_agent",
+        "compare_agent": "compare_agent"
+    }
+)
+
+# Connect specialized agents to validator
+workflow.add_edge("rag_agent", "validator")
+workflow.add_edge("summarise_agent", "validator")
+workflow.add_edge("compare_agent", "validator")
+
+# Define conditional edge for self-correction loop from validator
+def should_retry(state: DocIntelState) -> Literal["router", "__end__"]:
+    """
+    Determines if the flow should retry based on the validation score.
+    In the new graph, we retry from the router to allow re-classification or refined queries.
     """
     score = state.get("faithfulness_score", 0)
     retry_count = state.get("retry_count", 0)
@@ -59,14 +85,14 @@ def should_retry(state: DocIntelState) -> Literal["retriever", "__end__"]:
     if (score and score > 0.8) or retry_count >= 3:
         return END
     
-    # Otherwise, try retrieving again (perhaps with refined query in future)
-    return "retriever"
+    # Otherwise, try from the beginning (could be more sophisticated in future)
+    return "router"
 
 workflow.add_conditional_edges(
     "validator",
     should_retry,
     {
-        "retriever": "retriever",
+        "router": "router",
         END: END
     }
 )
