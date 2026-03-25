@@ -6,6 +6,7 @@ from backend.app.db.session import get_sync_session
 from backend.app.models.document import Document, Chunk
 from backend.app.services.parser import parse_pdf
 from backend.app.services.chunker import semantic_chunk
+from backend.app.services.embeddings import generate_embeddings
 import json
 import redis
 
@@ -55,17 +56,25 @@ def process_document(self, doc_id: str):
 
             # 4. Call semantic_chunk
             full_text = "\n".join([p["content"] for p in pages])
-            chunks = semantic_chunk(full_text)
-            publish_status(doc_id, "chunking", 80)
+            chunk_texts = semantic_chunk(full_text)
+            publish_status(doc_id, "chunking", 70)
+
+            # 5. Generate Embeddings
+            doc.status = "embedding"
+            db.commit()
+            publish_status(doc_id, "embedding", 75)
+            
+            embeddings = generate_embeddings(chunk_texts)
+            publish_status(doc_id, "embedding", 90)
 
             # Save chunks to DB (using bulk add for performance)
             db_chunks = [
-                Chunk(document_id=doc.id, content=chunk_text)
-                for chunk_text in chunks
+                Chunk(document_id=doc.id, content=text, embedding=embedding)
+                for text, embedding in zip(chunk_texts, embeddings)
             ]
             db.add_all(db_chunks)
             
-            # 5. Update DB status to ready
+            # 6. Update DB status to ready
             doc.status = "ready"
             db.commit()
             publish_status(doc_id, "ready", 100)
