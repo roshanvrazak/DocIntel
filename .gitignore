@@ -1,1 +1,10 @@
 __pycache__/
+.env
+*.md
+docs/
+.gemini/
+__pycache__/
+*.pyc
+.venv/
+backend/__pycache__/
+backend/.venv/
