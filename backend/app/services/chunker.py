@@ -1,6 +1,6 @@
 import os
 from typing import List, Optional
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 import logging
 
 logger = logging.getLogger(__name__)
