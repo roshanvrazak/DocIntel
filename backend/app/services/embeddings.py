@@ -4,8 +4,8 @@ from typing import List, Optional, Callable
 import litellm
 from litellm.exceptions import ServiceUnavailableError, APIError, Timeout
 
-# Point to LiteLLM Proxy
-LITELLM_PROXY_URL = os.getenv("LITELLM_PROXY_URL", "http://litellm:4000")
+# Point to LiteLLM Proxy or directly to Ollama
+LITELLM_PROXY_URL = os.getenv("LITELLM_PROXY_URL", "http://ollama:11434")
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ def generate_embeddings(
         batch = texts[i : i + batch_size]
         try:
             response = litellm.embedding(
-                model="nomic-embed-text",
+                model="ollama/nomic-embed-text",
                 input=batch,
                 api_base=LITELLM_PROXY_URL,
                 api_key="sk-dummy",

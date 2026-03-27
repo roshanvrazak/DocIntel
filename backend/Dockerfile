@@ -1,27 +1,28 @@
 FROM python:3.11-slim
 
-WORKDIR /app
+WORKDIR /
 
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Create backend directory
+RUN mkdir -p /backend
+
 # Add non-root user
-RUN useradd -m appuser && chown -R appuser:appuser /app
+RUN useradd -m appuser && chown -R appuser:appuser /backend
 
-COPY pyproject.toml .
+COPY pyproject.toml /backend/
 
-# Create a dummy app/main.py if it doesn't exist to allow uvicorn to start and pip install to find a package
-RUN mkdir -p app && touch app/__init__.py && \
-    echo "from fastapi import FastAPI\napp = FastAPI()" > app/main.py
+# Install dependencies
+RUN pip install --no-cache-dir /backend/
 
-# Install dependencies and the project
-RUN pip install --no-cache-dir .
-
-COPY . .
-RUN chown -R appuser:appuser /app
+COPY . /backend/
+RUN chown -R appuser:appuser /backend
 
 USER appuser
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENV PYTHONPATH=/
+
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

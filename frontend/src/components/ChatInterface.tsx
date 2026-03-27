@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send, User, Cpu, Loader2, Link2, MessageSquare, Sparkles } from 'lucide-react';
+import { Send, User, Cpu, Link2, MessageSquare, Sparkles } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { CitationCard } from './CitationCard';

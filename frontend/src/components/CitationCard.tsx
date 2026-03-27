@@ -1,12 +1,6 @@
 import React from 'react';
 import { FileText, X } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 import { CitationData } from '../types';
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
 
 interface CitationCardProps {
   citation: CitationData;

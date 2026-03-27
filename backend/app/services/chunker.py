@@ -21,7 +21,7 @@ class ChunkerService:
         """Initializes the embeddings and text splitter once."""
         try:
             # Configurable via environment variables
-            self.api_base = os.getenv("LITELLM_PROXY_URL", "http://localhost:4000")
+            self.api_base = os.getenv("LITELLM_PROXY_URL", "http://ollama:11434")
             self.model_name = os.getenv("EMBEDDING_MODEL_NAME", "ollama/nomic-embed-text")
             
             logger.info(f"Initializing ChunkerService with model={self.model_name}, api_base={self.api_base}")

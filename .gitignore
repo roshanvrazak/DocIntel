@@ -8,3 +8,5 @@ __pycache__/
 .venv/
 backend/__pycache__/
 backend/.venv/
+test.pdf
+backend/uploads/
