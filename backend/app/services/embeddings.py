@@ -1,11 +1,10 @@
 import os
 import logging
+import requests
 from typing import List, Optional, Callable
-import litellm
-from litellm.exceptions import ServiceUnavailableError, APIError, Timeout
 
-# Point to LiteLLM Proxy or directly to Ollama
-LITELLM_PROXY_URL = os.getenv("LITELLM_PROXY_URL", "http://ollama:11434")
+# Point to Ollama directly
+OLLAMA_URL = os.getenv("LITELLM_PROXY_URL", "http://ollama:11434")
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +14,7 @@ def generate_embeddings(
     progress_callback: Optional[Callable[[int, int], None]] = None
 ) -> List[List[float]]:
     """
-    Generate embeddings for a list of strings using LiteLLM proxy to Ollama.
+    Generate embeddings for a list of strings using direct Ollama API.
     Uses 'nomic-embed-text' model.
     Implements batching and error handling.
     """
@@ -28,25 +27,34 @@ def generate_embeddings(
     for i in range(0, total_texts, batch_size):
         batch = texts[i : i + batch_size]
         try:
-            response = litellm.embedding(
-                model="ollama/nomic-embed-text",
-                input=batch,
-                api_base=LITELLM_PROXY_URL,
-                api_key="sk-dummy",
+            # Call Ollama /api/embed directly
+            response = requests.post(
+                f"{OLLAMA_URL}/api/embed",
+                json={
+                    "model": "nomic-embed-text",
+                    "input": batch
+                },
                 timeout=60
             )
             
-            batch_embeddings = [item["embedding"] for item in response.data]
+            if response.status_code != 200:
+                logger.error(f"Ollama error: {response.status_code} - {response.text}")
+                response.raise_for_status()
+                
+            data = response.json()
+            batch_embeddings = data.get("embeddings", [])
+            
+            if not batch_embeddings:
+                logger.error(f"Ollama returned no embeddings: {data}")
+                raise Exception("Ollama returned no embeddings")
+                
             all_embeddings.extend(batch_embeddings)
             
             if progress_callback:
                 progress_callback(len(all_embeddings), total_texts)
                 
-        except (ServiceUnavailableError, APIError, Timeout) as e:
-            logger.error(f"LiteLLM error during embedding: {str(e)}")
-            raise e
         except Exception as e:
-            logger.error(f"Unexpected error during embedding: {str(e)}")
+            logger.error(f"Error during embedding: {str(e)}")
             raise e
 
     return all_embeddings
