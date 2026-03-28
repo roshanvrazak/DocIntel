@@ -40,26 +40,23 @@ async def rag_node(state: DocIntelState) -> DocIntelState:
             
         context_text = "\n\n".join(context_parts)
         
-        system_prompt = f"""
-        You are an expert document analysis assistant. Answer the user's question based ONLY on the provided document segments.
-        Use the numeric citations [1], [2], etc., when referring to information from a specific segment.
-        If the answer is not in the context, state that you don't have enough information to answer definitively.
-        
-        Context:
-        {context_text}
-        """
-        
+        system_prompt = "Answer ONLY from the provided context. Use citations [1], [2], etc. If unsupported, say so."
+
         response = await litellm.acompletion(
             model="gemini/gemini-1.5-pro",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Question: {query}"}
+                {"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {query}"}
             ],
             api_base=LITELLM_PROXY_URL,
-            temperature=0.2
+            api_key="sk-dummy",
+            temperature=0.2,
+            max_tokens=2000
         )
-        
+
         draft_response = response.choices[0].message.content
+        if response.choices[0].finish_reason == "length":
+            draft_response += "\n\n[Response truncated. Try asking a more specific question.]"
         
     except Exception as e:
         logger.error(f"Error in rag_node: {str(e)}")

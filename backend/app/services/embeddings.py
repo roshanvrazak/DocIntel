@@ -4,7 +4,7 @@ import requests
 from typing import List, Optional, Callable
 
 # Point to Ollama directly
-OLLAMA_URL = os.getenv("LITELLM_PROXY_URL", "http://ollama:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
 
 logger = logging.getLogger(__name__)
 

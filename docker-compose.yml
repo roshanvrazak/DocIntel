@@ -9,6 +9,11 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docintel -d docintel"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -30,6 +35,7 @@ services:
     image: ghcr.io/berriai/litellm:main-stable
     ports:
       - "4000:4000"
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - LITELLM_LOG=DEBUG
@@ -38,7 +44,12 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:4000/health/readiness\")'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       - ollama
     restart: always
@@ -52,7 +63,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 1G
 
   backend:
     build: ./backend
@@ -61,18 +72,23 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql://docintel:docintel@postgres:5432/docintel}
       - REDIS_URL=redis://redis:6379/0
-      - LITELLM_PROXY_URL=http://ollama:11434
+      - LITELLM_PROXY_URL=http://litellm:4000
+      - OLLAMA_URL=http://ollama:11434
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     volumes:
       - ./backend:/backend
       - ./backend/uploads:/backend/uploads
     depends_on:
-      - postgres
-      - redis
-      - litellm
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      litellm:
+        condition: service_healthy
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 1G
     command: >
       sh -c "python backend/app/db/init_db.py && uvicorn backend.app.main:app --host 0.0.0.0 --port 8000"
 
@@ -82,18 +98,23 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql://docintel:docintel@postgres:5432/docintel}
       - REDIS_URL=redis://redis:6379/0
-      - LITELLM_PROXY_URL=http://ollama:11434
+      - LITELLM_PROXY_URL=http://litellm:4000
+      - OLLAMA_URL=http://ollama:11434
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     volumes:
       - ./backend:/backend
       - ./backend/uploads:/backend/uploads
     depends_on:
-      - postgres
-      - redis
-      - litellm
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      litellm:
+        condition: service_healthy
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 1G
 
   frontend:
     build: ./frontend

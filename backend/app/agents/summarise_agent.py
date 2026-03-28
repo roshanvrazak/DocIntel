@@ -68,14 +68,19 @@ async def summarise_node(state: DocIntelState) -> DocIntelState:
         if intent == "summarise_each":
             # Summarize each document individually in parallel
             async def get_summary(doc):
-                prompt = f"Provide a comprehensive summary of the following document, highlighting its main purpose, key findings, and significant takeaways:\n\nDocument Name: {doc['filename']}\nContent: {doc['content']}"
+                prompt = f"Summarize this document's purpose, key findings, and takeaways.\n\nDocument: {doc['filename']}\n{doc['content']}"
                 response = await litellm.acompletion(
                     model="gemini/gemini-1.5-pro",
                     messages=[{"role": "user", "content": prompt}],
                     api_base=LITELLM_PROXY_URL,
-                    temperature=0.3
+                    api_key="sk-dummy",
+                    temperature=0.3,
+                    max_tokens=2000
                 )
-                return f"### Summary of {doc['filename']}:\n{response.choices[0].message.content}"
+                content = response.choices[0].message.content
+                if response.choices[0].finish_reason == "length":
+                    content += "\n\n[Summary truncated.]"
+                return f"### Summary of {doc['filename']}:\n{content}"
             
             tasks = [get_summary(doc) for doc in all_docs_content]
             summaries = await asyncio.gather(*tasks)
@@ -85,21 +90,19 @@ async def summarise_node(state: DocIntelState) -> DocIntelState:
             # Combined summary (Simplified Map-Reduce)
             combined_content = "\n\n".join([f"--- Document: {d['filename']} ---\n{d['content']}" for d in all_docs_content])
             
-            prompt = f"""
-            Provide a comprehensive summary of the following documents. 
-            Identify key themes, major findings, and important takeaways across all provided materials.
-            
-            Documents:
-            {combined_content}
-            """
-            
+            prompt = f"Summarize these documents. Identify key themes, findings, and takeaways.\n\nDocuments:\n{combined_content}"
+
             response = await litellm.acompletion(
                 model="gemini/gemini-1.5-pro",
                 messages=[{"role": "user", "content": prompt}],
                 api_base=LITELLM_PROXY_URL,
-                temperature=0.3
+                api_key="sk-dummy",
+                temperature=0.3,
+                max_tokens=3000
             )
             final_summary = response.choices[0].message.content
+            if response.choices[0].finish_reason == "length":
+                final_summary += "\n\n[Summary truncated due to length constraints.]"
             
         return {
             "draft_response": final_summary,

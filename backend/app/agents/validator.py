@@ -25,27 +25,19 @@ async def validator_node(state: DocIntelState) -> DocIntelState:
     
     context_text = "\n\n".join([f"Chunk {i+1}:\n{chunk.get('content')}" for i, chunk in enumerate(retrieved_chunks)])
     
-    system_prompt = f"""
-    You are an objective auditor of AI-generated responses. Your task is to score the faithfulness of a response based on provided document chunks.
-    
-    Grounding Context:
-    {context_text}
-    
-    Evaluate the following response:
-    {draft_response}
-    
-    Provide a faithfulness score between 0.0 and 1.0, where 1.0 means every claim in the response is fully supported by the context, and 0.0 means the response is entirely hallucinated or unsupported.
-    Return ONLY the numeric score (e.g., 0.85). No other text.
-    """
-    
+    system_prompt = "Score faithfulness of the response vs context. Return ONLY a number 0.0-1.0."
+
     try:
         response = await litellm.acompletion(
             model="gemini/gemini-1.5-flash",
             messages=[
                 {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Context:\n{context_text}\n\nResponse:\n{draft_response}"}
             ],
             api_base=LITELLM_PROXY_URL,
-            temperature=0.0
+            api_key="sk-dummy",
+            temperature=0.0,
+            max_tokens=10
         )
         
         score_text = response.choices[0].message.content.strip()

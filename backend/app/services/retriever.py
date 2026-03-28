@@ -21,36 +21,27 @@ class HybridRetriever:
 
     async def generate_multi_queries(self, query_text: str) -> List[str]:
         """
-        Use Gemini 1.5 Flash (via LiteLLM) to generate 3-5 query variations.
+        Use Gemini 1.5 Flash (via LiteLLM) to generate 3 query variations.
         """
         try:
-            prompt = f"""
-            You are an expert search assistant. Generate 3-5 variations of the following user query 
-            to help improve retrieval from a document database. 
-            The variations should capture different aspects or synonyms of the original query.
-            
-            Original query: {query_text}
-            
-            Return ONLY the variations, one per line, without any numbering or additional text.
-            """
-            
+            prompt = f"Generate 3 search query variations for: {query_text}\nReturn ONLY variations, one per line."
+
             response = await asyncio.to_thread(
                 litellm.completion,
                 model="gemini/gemini-1.5-flash",
                 messages=[{"role": "user", "content": prompt}],
                 api_base=LITELLM_PROXY_URL,
                 api_key="sk-dummy",
-                timeout=10
+                timeout=10,
+                max_tokens=150
             )
-            
+
             variations = response.choices[0].message.content.strip().split("\n")
-            # Clean up and filter variations
             queries = [v.strip() for v in variations if v.strip()]
-            # Include original query if not already there
             if query_text not in queries:
                 queries.insert(0, query_text)
-            
-            return queries[:6] # Original + up to 5 variations
+
+            return queries[:4] # Original + up to 3 variations
             
         except Exception as e:
             logger.error(f"Error generating multi-queries: {str(e)}")
@@ -63,44 +54,32 @@ class HybridRetriever:
         top_n: int = 5
     ) -> List[Dict[str, Any]]:
         """
-        Use Gemini 1.5 Pro (via LiteLLM) to score and re-rank the top candidates.
+        Use Gemini 1.5 Flash (via LiteLLM) to score and re-rank the top candidates.
         """
         if not results:
             return []
 
         try:
-            # Prepare chunks for re-ranking
-            # We'll use the first 20 results for re-ranking
-            candidates = results[:20]
-            
+            # Re-rank top 10 candidates (reduced from 20 to save tokens)
+            candidates = results[:10]
+
             chunks_to_rank = []
             for i, res in enumerate(candidates):
                 chunks_to_rank.append({
                     "id": str(res["chunk"].id),
-                    "content": res["chunk"].content[:1000] # Limit content length
+                    "content": res["chunk"].content[:500]  # Truncate to 500 chars
                 })
 
-            prompt = f"""
-            You are an expert relevance judge. Given the following user query and a list of document chunks, 
-            score each chunk on a scale of 0 to 10 based on its relevance to the query.
-            A score of 10 means highly relevant, 0 means not relevant at all.
-            
-            Query: {query_text}
-            
-            Chunks:
-            {json.dumps(chunks_to_rank, indent=2)}
-            
-            Return ONLY a JSON list of objects, each containing 'id' and 'score'. 
-            Example: [{{"id": "uuid-1", "score": 9.5}}, {{"id": "uuid-2", "score": 4.0}}]
-            """
-            
+            prompt = f"Score each chunk's relevance (0-10) to the query.\nQuery: {query_text}\nChunks:\n{json.dumps(chunks_to_rank)}\nReturn JSON: [{{\"id\": \"...\", \"score\": N}}]"
+
             response = await asyncio.to_thread(
                 litellm.completion,
-                model="gemini/gemini-1.5-pro",
+                model="gemini/gemini-1.5-flash",  # Downgraded from Pro — scoring doesn't need Pro
                 messages=[{"role": "user", "content": prompt}],
                 api_base=LITELLM_PROXY_URL,
                 api_key="sk-dummy",
                 timeout=30,
+                max_tokens=500,
                 response_format={"type": "json_object"}
             )
             
@@ -199,23 +178,18 @@ class HybridRetriever:
         # 2. Generate embeddings for all queries at once
         embedding_task = asyncio.to_thread(generate_embeddings, queries)
         
-        # 3. Start all sparse searches in parallel
-        sparse_tasks = [
-            asyncio.create_task(self.sparse_search(q, top_k=20, document_ids=document_ids)) 
-            for q in queries
-        ]
+        # 3. Perform searches sequentially (AsyncSession is not concurrent-safe)
+        sparse_results_list = []
+        for q in queries:
+            res = await self.sparse_search(q, top_k=20, document_ids=document_ids)
+            sparse_results_list.append(res)
         
         embeddings = await embedding_task
         
-        # 4. Start all dense searches in parallel (once embeddings are ready)
-        dense_tasks = [
-            asyncio.create_task(self.dense_search(emb, top_k=20, document_ids=document_ids)) 
-            for emb in embeddings
-        ]
-        
-        # 5. Wait for all searches to complete
-        sparse_results_list = await asyncio.gather(*sparse_tasks)
-        dense_results_list = await asyncio.gather(*dense_tasks)
+        dense_results_list = []
+        for emb in embeddings:
+            res = await self.dense_search(emb, top_k=20, document_ids=document_ids)
+            dense_results_list.append(res)
 
         # 6. Apply RRF Fusion
         rrf_scores: Dict[uuid.UUID, float] = {}
@@ -232,10 +206,10 @@ class HybridRetriever:
 
         # 7. Sort by RRF score to get top candidates for re-ranking
         sorted_candidates = sorted(
-            rrf_scores.items(), 
-            key=lambda x: x[1], 
+            rrf_scores.items(),
+            key=lambda x: x[1],
             reverse=True
-        )[:20]
+        )[:10]
 
         candidate_results = [
             {"chunk": chunks_map[cid], "rrf_score": score} 

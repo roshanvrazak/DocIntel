@@ -69,17 +69,8 @@ async def compare_node(state: DocIntelState) -> DocIntelState:
 
         combined_docs = "\n\n".join([f"--- Document: {d['filename']} ---\n{d['content']}" for d in all_docs_content])
         
-        system_prompt = """
-        You are an expert document analyst specializing in cross-document comparisons. 
-        Given a set of documents and a user query, your task is to:
-        1. Identify the key dimensions or categories for comparison relevant to the query.
-        2. Create a structured comparison matrix (using markdown tables where appropriate).
-        3. Highlight any contradictions or conflicting information between documents.
-        4. Provide a balanced synthesis of the similarities and differences.
-        
-        Use clear headings and concise bullet points.
-        """
-        
+        system_prompt = "Compare documents: identify key dimensions, build a markdown comparison table, highlight contradictions, and synthesize differences."
+
         response = await litellm.acompletion(
             model="gemini/gemini-1.5-pro",
             messages=[
@@ -87,10 +78,14 @@ async def compare_node(state: DocIntelState) -> DocIntelState:
                 {"role": "user", "content": f"Query: {query}\n\nDocuments:\n{combined_docs}"}
             ],
             api_base=LITELLM_PROXY_URL,
-            temperature=0.2
+            api_key="sk-dummy",
+            temperature=0.2,
+            max_tokens=3000
         )
-        
+
         comparison = response.choices[0].message.content
+        if response.choices[0].finish_reason == "length":
+            comparison += "\n\n[Comparison truncated due to length constraints.]"
         return {
             "draft_response": comparison,
             "retrieved_chunks": retrieved_chunks
