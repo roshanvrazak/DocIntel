@@ -10,3 +10,4 @@ backend/__pycache__/
 backend/.venv/
 test.pdf
 backend/uploads/
+dev_plan.md

@@ -1,6 +1,9 @@
 import os
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from backend.app.api.dependencies.limiter import limiter
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -14,51 +17,57 @@ from backend.app.api.routes.upload import router as upload_router
 from backend.app.api.routes.chat import router as chat_router
 from backend.app.api.websocket.progress import progress_websocket
 
-# Initialize Arize Phoenix Tracing via OTLP gRPC
+# --- Tracing ---
 PHOENIX_ENDPOINT = os.getenv("PHOENIX_ENDPOINT", "http://phoenix:4317")
-resource = Resource(attributes={
-    "service.name": "docintel-backend"
-})
-
+resource = Resource(attributes={"service.name": "docintel-backend"})
 tracer_provider = TracerProvider(resource=resource)
 try:
     otlp_exporter = OTLPSpanExporter(endpoint=PHOENIX_ENDPOINT, insecure=True, timeout=10)
-    span_processor = BatchSpanProcessor(otlp_exporter)
-    tracer_provider.add_span_processor(span_processor)
+    tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
     print(f"Tracing initialized pointing to {PHOENIX_ENDPOINT}")
 except Exception as e:
     print(f"Warning: Failed to initialize OTLP exporter to {PHOENIX_ENDPOINT}: {e}")
     print("Tracing will be disabled.")
 
 trace.set_tracer_provider(tracer_provider)
-
-# Instrument LangChain/LangGraph and LiteLLM
 LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
 LiteLLMInstrumentor().instrument(tracer_provider=tracer_provider)
 
+# --- App ---
 app = FastAPI(title="DocIntel API")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Instrument FastAPI
 FastAPIInstrumentor.instrument_app(app, tracer_provider=tracer_provider)
 
-# Add CORS middleware
+# --- CORS ---
+_raw_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+CORS_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False, # Must be False if origins is ["*"]
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
 
-# Include routers
+# --- Routers ---
 app.include_router(upload_router)
 app.include_router(chat_router)
 
-# WebSocket endpoint
+
 @app.websocket("/ws/progress/{doc_id}")
 async def websocket_endpoint(websocket: WebSocket, doc_id: str):
     await progress_websocket(websocket, doc_id)
 
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to DocIntel API"}
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint for orchestrators and load balancers."""
+    return {"status": "ok"}

@@ -30,8 +30,12 @@ dependencies = [
     "openinference-instrumentation-langchain",
     "openinference-instrumentation-litellm",
     "arize-phoenix",
+    "slowapi",
+    "httpx",
+    "ruff",
     "pytest",
     "pytest-asyncio",
+    "anyio[trio]",
 ]
 
 [build-system]

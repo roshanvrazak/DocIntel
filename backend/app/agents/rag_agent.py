@@ -59,8 +59,8 @@ async def rag_node(state: DocIntelState) -> DocIntelState:
             draft_response += "\n\n[Response truncated. Try asking a more specific question.]"
         
     except Exception as e:
-        logger.error(f"Error in rag_node: {str(e)}")
-        draft_response = f"I encountered an error while analyzing the documents: {str(e)}"
+        logger.error("Error in rag_node: %s", str(e), exc_info=True)
+        draft_response = "I encountered an error while analyzing the documents. Please try again."
         retrieved_chunks = []
         
     return {

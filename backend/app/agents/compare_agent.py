@@ -92,5 +92,5 @@ async def compare_node(state: DocIntelState) -> DocIntelState:
         }
         
     except Exception as e:
-        logger.error(f"Error in compare_node: {str(e)}")
-        return {"draft_response": f"I encountered an error while comparing the documents: {str(e)}"}
+        logger.error("Error in compare_node: %s", str(e), exc_info=True)
+        return {"draft_response": "I encountered an error while comparing the documents. Please try again."}

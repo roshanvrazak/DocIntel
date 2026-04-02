@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Backend: lint + unit + integration + load tests
+  # -------------------------------------------------------------------------
+  backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: docintel
+          POSTGRES_PASSWORD: docintel
+          POSTGRES_DB: docintel
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://docintel:docintel@localhost:5432/docintel
+      REDIS_URL: redis://localhost:6379/0
+      UPLOAD_DIR: /tmp/docintel_uploads
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install ruff httpx anyio[trio] pytest pytest-asyncio -e .
+
+      - name: Lint with ruff
+        working-directory: backend
+        run: ruff check app/ tests/ --select E,F,W,I --ignore E501
+
+      - name: Run tests
+        working-directory: backend
+        run: pytest tests/ -v --tb=short --asyncio-mode=auto
+
+  # -------------------------------------------------------------------------
+  # Frontend: lint + Vitest
+  # -------------------------------------------------------------------------
+  frontend:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint with ESLint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Run Vitest
+        working-directory: frontend
+        run: npm test
+
+  # -------------------------------------------------------------------------
+  # Docker build verification
+  # -------------------------------------------------------------------------
+  docker-build:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t docintel-backend:ci ./backend
+
+      - name: Build frontend image
+        run: docker build -t docintel-frontend:ci ./frontend
