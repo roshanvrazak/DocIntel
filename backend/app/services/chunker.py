@@ -1,7 +1,7 @@
-import os
 from typing import List, Optional
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import logging
+from backend.app.config import CHUNK_SIZE, CHUNK_OVERLAP
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +20,8 @@ class ChunkerService:
         try:
             # Simple recursive character splitting is more robust for a prototype
             self._text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200,
+                chunk_size=CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP,
                 length_function=len,
                 is_separator_regex=False,
             )

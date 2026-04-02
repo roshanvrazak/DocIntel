@@ -1,7 +1,7 @@
 __pycache__/
 .env
-*.md
 docs/
+dev_plan.md
 .gemini/
 __pycache__/
 *.pyc

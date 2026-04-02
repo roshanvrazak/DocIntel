@@ -15,6 +15,7 @@ from openinference.instrumentation.litellm import LiteLLMInstrumentor
 
 from backend.app.api.routes.upload import router as upload_router
 from backend.app.api.routes.chat import router as chat_router
+from backend.app.api.routes.documents import router as documents_router
 from backend.app.api.websocket.progress import progress_websocket
 
 # --- Tracing ---
@@ -34,7 +35,12 @@ LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
 LiteLLMInstrumentor().instrument(tracer_provider=tracer_provider)
 
 # --- App ---
-app = FastAPI(title="DocIntel API")
+app = FastAPI(
+    title="DocIntel API",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -55,6 +61,7 @@ app.add_middleware(
 # --- Routers ---
 app.include_router(upload_router)
 app.include_router(chat_router)
+app.include_router(documents_router)
 
 
 @app.websocket("/ws/progress/{doc_id}")
@@ -69,5 +76,30 @@ async def root():
 
 @app.get("/health")
 async def health():
-    """Health check endpoint for orchestrators and load balancers."""
-    return {"status": "ok"}
+    """Health check — verifies DB and Redis connectivity."""
+    import os
+    import redis.asyncio as aioredis
+    from backend.app.db.session import engine
+    from sqlalchemy import text
+
+    checks: dict = {}
+
+    # Database
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = f"error: {e}"
+
+    # Redis
+    try:
+        r = aioredis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"))
+        await r.ping()
+        await r.aclose()
+        checks["redis"] = "ok"
+    except Exception as e:
+        checks["redis"] = f"error: {e}"
+
+    overall = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
+    return {"status": overall, **checks}

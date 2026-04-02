@@ -16,3 +16,13 @@ export const uploadClient = axios.create({
     'Content-Type': 'multipart/form-data',
   },
 });
+
+// Document management helpers
+export const documentsApi = {
+  list: (page = 1, limit = 20) =>
+    apiClient.get(`/api/documents?page=${page}&limit=${limit}`),
+  delete: (id: string) =>
+    apiClient.delete(`/api/documents/${id}`),
+  reprocess: (id: string) =>
+    apiClient.post(`/api/documents/${id}/reprocess`),
+};

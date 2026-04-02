@@ -1,9 +1,10 @@
 import os
 import re
+import json
 import logging
 import asyncio
 import uuid
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 from typing import List, Optional
@@ -16,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 MAX_QUERY_LENGTH = int(os.getenv("MAX_QUERY_LENGTH", "2000"))
 
-# Common prompt injection patterns to block
 _INJECTION_PATTERNS = re.compile(
     r"(ignore\s+(previous|all|above|prior)\s+(instructions?|prompts?|context)|"
     r"disregard\s+(previous|all|above|prior)\s+(instructions?|prompts?|context)|"
@@ -24,6 +24,8 @@ _INJECTION_PATTERNS = re.compile(
     r"system\s*:\s*you|<\s*system\s*>)",
     re.IGNORECASE,
 )
+
+CITATION_SENTINEL = "\n\n__CITATIONS_JSON__\n"
 
 
 class ChatRequest(BaseModel):
@@ -47,7 +49,7 @@ class ChatRequest(BaseModel):
 @router.post("/api/chat", dependencies=[Depends(verify_api_key)])
 @limiter.limit("30/minute")
 async def chat_endpoint(request: Request, body: ChatRequest):
-    """Streams a response from the document intelligence agents."""
+    """Streams a text response followed by a citation JSON block."""
     doc_uuids = []
     for d_id in (body.doc_ids or []):
         try:
@@ -71,10 +73,28 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 yield "I'm sorry, I couldn't generate a response for that query."
                 return
 
+            # Stream text word by word
             words = final_response.split(" ")
             for i, word in enumerate(words):
                 yield word + (" " if i < len(words) - 1 else "")
                 await asyncio.sleep(0.02)
+
+            # Append real citations from retrieved_chunks
+            raw_chunks = result.get("retrieved_chunks", [])
+            if raw_chunks:
+                citations = [
+                    {
+                        "id": c.get("chunk_id", str(i)),
+                        "chunk_id": c.get("chunk_id"),
+                        "doc_id": c.get("document_id"),
+                        "filename": c.get("filename", "Unknown"),
+                        "text": c.get("content", "")[:400],
+                        "page_number": c.get("page_number", 1),
+                        "relevance_score": round(float(c.get("score", 0)), 3),
+                    }
+                    for i, c in enumerate(raw_chunks[:5])
+                ]
+                yield CITATION_SENTINEL + json.dumps(citations)
 
         except Exception:
             logger.error("Unhandled error in chat_endpoint", exc_info=True)

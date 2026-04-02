@@ -4,6 +4,7 @@ import { UploadZone } from './components/UploadZone';
 import { ActionPanel, ActionType } from './components/ActionPanel';
 import { ChatInterface } from './components/ChatInterface';
 import { TraceViewer } from './components/TraceViewer';
+import { DocumentManager } from './components/DocumentManager';
 import { UploadingFile } from './types';
 
 function App() {
@@ -115,6 +116,14 @@ function App() {
                     selectedDocIds={selectedDocIds}
                     onDocSelectionChange={setSelectedDocIds}
                   />
+                </section>
+
+                <section className="space-y-6">
+                  <div>
+                    <h2 className="text-2xl font-black text-slate-900 tracking-tight">Documents</h2>
+                    <p className="text-sm text-slate-500 font-medium">Manage processed document library.</p>
+                  </div>
+                  <DocumentManager onDocumentsChange={() => {}} />
                 </section>
 
                 <section className="space-y-6">
