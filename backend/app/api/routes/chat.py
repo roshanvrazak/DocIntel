@@ -59,10 +59,20 @@ async def chat_endpoint(request: Request, body: ChatRequest):
         except ValueError:
             logger.warning("Invalid UUID provided: %s", d_id)
 
+    # Normalise frontend action names to backend intent tokens.
+    # The UI uses American spellings / shorthand; the graph uses the canonical set.
+    _ACTION_MAP = {
+        "summarize": "summarise",
+        "summarize_each": "summarise_each",
+        "search": "qa",           # semantic search falls through to RAG
+        "contradictions": "contradict",
+    }
+    action = _ACTION_MAP.get(body.action or "qa", body.action or "qa")
+
     initial_state = {
         "query": body.query,
         "documents": doc_uuids,
-        "intent": body.action if body.action != "qa" else None,
+        "intent": action if action != "qa" else None,
         "retry_count": 0,
     }
 

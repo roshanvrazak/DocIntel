@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutGrid, FileText, GitCompare, MessageSquare, Search, Sparkles } from 'lucide-react';
+import { LayoutGrid, FileText, GitCompare, MessageSquare, Search, Sparkles, ListChecks, Clock } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { UploadingFile } from '../types';
@@ -8,7 +8,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export type ActionType = 'summarize' | 'compare' | 'qa' | 'extract' | 'search';
+export type ActionType = 'summarize' | 'compare' | 'qa' | 'extract' | 'search' | 'action_items' | 'timeline';
 
 interface Action {
   id: ActionType;
@@ -46,6 +46,20 @@ const ACTIONS: Action[] = [
     description: 'Extract entities, metrics, and key findings.',
     icon: <Sparkles className="h-5 w-5" />,
     color: 'bg-amber-100 text-amber-600',
+  },
+  {
+    id: 'action_items',
+    label: 'Action Items',
+    description: 'Pull out tasks, decisions, and follow-ups.',
+    icon: <ListChecks className="h-5 w-5" />,
+    color: 'bg-rose-100 text-rose-600',
+  },
+  {
+    id: 'timeline',
+    label: 'Timeline',
+    description: 'Reconstruct a chronological sequence of events.',
+    icon: <Clock className="h-5 w-5" />,
+    color: 'bg-cyan-100 text-cyan-600',
   },
   {
     id: 'search',
@@ -97,7 +111,7 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
           Agent Actions
         </h3>
         <p className="text-xs text-slate-500 font-medium mt-1 uppercase tracking-wider">
-          Intelligence task & Document Scope
+          Intelligence task &amp; Document Scope
         </p>
       </div>
 
@@ -118,7 +132,7 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
               )}
             >
               <div className={cn(
-                "p-3 rounded-xl mr-5 transition-transform group-hover:scale-110 duration-300 shadow-sm", 
+                "p-3 rounded-xl mr-5 transition-transform group-hover:scale-110 duration-300 shadow-sm",
                 action.color
               )}>
                 {action.icon}

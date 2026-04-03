@@ -2,7 +2,7 @@ import re
 import logging
 import litellm
 from .state import DocIntelState
-from backend.app.config import LITELLM_PROXY_URL, FAITHFULNESS_THRESHOLD
+from backend.app.config import LITELLM_PROXY_URL, LITELLM_API_KEY, FAITHFULNESS_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ async def _score_with_llm(system_prompt: str, user_content: str) -> float:
             {"role": "user", "content": user_content},
         ],
         api_base=LITELLM_PROXY_URL,
-        api_key="sk-dummy",
+        api_key=LITELLM_API_KEY,
         temperature=0.0,
         max_tokens=10,
     )
