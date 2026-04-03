@@ -53,7 +53,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: backend
-        run: pip install ruff httpx anyio[trio] pytest pytest-asyncio -e .
+        run: pip install ruff httpx anyio[trio] pytest pytest-asyncio prometheus-client -e .
 
       - name: Lint with ruff
         working-directory: backend

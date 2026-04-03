@@ -8,6 +8,7 @@ from backend.app.models.document import Document
 from backend.app.worker import process_document
 from backend.app.api.dependencies.auth import verify_api_key
 from backend.app.api.dependencies.limiter import limiter
+from backend.app.services.metrics import inc_documents_processed, inc_celery_task
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -52,5 +53,7 @@ async def upload_document(
         buffer.write(content)
 
     process_document.delay(str(doc_id))
+    inc_documents_processed("success")
+    inc_celery_task("process_document", "dispatched")
 
     return {"id": str(doc_id), "filename": file.filename, "status": "uploaded"}

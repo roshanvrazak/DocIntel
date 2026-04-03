@@ -7,6 +7,7 @@ from sqlalchemy import select
 from .state import DocIntelState
 from backend.app.models.document import Chunk, Document
 from backend.app.db.session import async_session
+from backend.app.services.context_manager import truncate_text
 
 # Point to LiteLLM Proxy if available
 LITELLM_PROXY_URL = os.getenv("LITELLM_PROXY_URL", "http://litellm:4000")
@@ -68,7 +69,9 @@ async def summarise_node(state: DocIntelState) -> DocIntelState:
         if intent == "summarise_each":
             # Summarize each document individually in parallel
             async def get_summary(doc):
-                prompt = f"Summarize this document's purpose, key findings, and takeaways.\n\nDocument: {doc['filename']}\n{doc['content']}"
+                content, truncated = truncate_text(doc["content"])
+                suffix = "\n\n[Content truncated to fit context limit.]" if truncated else ""
+                prompt = f"Summarize this document's purpose, key findings, and takeaways.\n\nDocument: {doc['filename']}\n{content}{suffix}"
                 response = await litellm.acompletion(
                     model="gemini/gemini-1.5-pro",
                     messages=[{"role": "user", "content": prompt}],
@@ -88,9 +91,10 @@ async def summarise_node(state: DocIntelState) -> DocIntelState:
             
         else:
             # Combined summary (Simplified Map-Reduce)
-            combined_content = "\n\n".join([f"--- Document: {d['filename']} ---\n{d['content']}" for d in all_docs_content])
-            
-            prompt = f"Summarize these documents. Identify key themes, findings, and takeaways.\n\nDocuments:\n{combined_content}"
+            combined_raw = "\n\n".join([f"--- Document: {d['filename']} ---\n{d['content']}" for d in all_docs_content])
+            combined_content, truncated = truncate_text(combined_raw)
+            suffix = "\n\n[Some document content was omitted to fit the context limit.]" if truncated else ""
+            prompt = f"Summarize these documents. Identify key themes, findings, and takeaways.\n\nDocuments:\n{combined_content}{suffix}"
 
             response = await litellm.acompletion(
                 model="gemini/gemini-1.5-pro",

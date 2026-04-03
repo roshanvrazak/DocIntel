@@ -3,6 +3,7 @@ import re
 import json
 import logging
 import asyncio
+import time
 import uuid
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -11,6 +12,7 @@ from typing import List, Optional
 from backend.app.agents.graph import graph
 from backend.app.api.dependencies.auth import verify_api_key
 from backend.app.api.dependencies.limiter import limiter
+from backend.app.services.metrics import observe_query_duration
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -66,7 +68,9 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
     async def generate_response():
         try:
+            _t0 = time.monotonic()
             result = await graph.ainvoke(initial_state)
+            observe_query_duration(time.monotonic() - _t0)
             final_response = result.get("final_response") or result.get("draft_response")
 
             if not final_response:

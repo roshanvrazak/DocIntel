@@ -9,6 +9,8 @@ from backend.app.services.retriever import HybridRetriever
 from backend.app.models.document import Document
 from backend.app.db.session import async_session
 from backend.app.config import LITELLM_PROXY_URL, REDIS_URL, RETRIEVAL_CACHE_TTL, RETRIEVER_TOP_K
+from backend.app.services.context_manager import truncate_context
+from backend.app.services.metrics import observe_retrieval_chunks
 import litellm
 
 logger = logging.getLogger(__name__)
@@ -52,15 +54,12 @@ async def rag_node(state: DocIntelState) -> DocIntelState:
             doc_result = await session.execute(doc_stmt)
             doc_map = {doc.id: doc.filename for doc in doc_result.scalars().all()}
 
-        context_parts = []
-        retrieved_chunks = []
-        for i, res in enumerate(results):
+        # Build chunk metadata list for truncation (ordered by relevance)
+        all_chunks_meta = []
+        for res in results:
             chunk = res["chunk"]
             filename = doc_map.get(chunk.document_id, "Unknown")
-            context_parts.append(
-                f"[{i+1}] Source: {filename} (page {chunk.page_number or 1})\nContent: {chunk.content}"
-            )
-            retrieved_chunks.append({
+            all_chunks_meta.append({
                 "content": chunk.content,
                 "document_id": str(chunk.document_id),
                 "chunk_id": str(chunk.id),
@@ -69,11 +68,23 @@ async def rag_node(state: DocIntelState) -> DocIntelState:
                 "score": res.get("rerank_score", res.get("score", 0)),
             })
 
-        context_text = "\n\n".join(context_parts)
         system_prompt = (
             "Answer ONLY from the provided context. Use inline citations [1], [2], etc. "
             "If the answer is not supported by the context, say so."
         )
+
+        # Enforce context budget before sending to LLM
+        prefix_overhead = len(system_prompt) + len(query) + 50  # prompt scaffolding chars
+        retrieved_chunks, was_truncated = truncate_context(all_chunks_meta, prefix=" " * prefix_overhead)
+        observe_retrieval_chunks(len(retrieved_chunks))
+
+        context_parts = [
+            f"[{i+1}] Source: {c['filename']} (page {c['page_number']})\nContent: {c['content']}"
+            for i, c in enumerate(retrieved_chunks)
+        ]
+        context_text = "\n\n".join(context_parts)
+        if was_truncated:
+            context_text += "\n\n[Note: some source chunks were omitted to fit the context limit.]"
 
         response = await litellm.acompletion(
             model="gemini/gemini-1.5-pro",

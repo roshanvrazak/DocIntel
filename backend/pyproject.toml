@@ -31,6 +31,7 @@ dependencies = [
     "openinference-instrumentation-litellm",
     "arize-phoenix",
     "slowapi",
+    "prometheus-client>=0.20",
     "httpx",
     "ruff",
     "pytest",

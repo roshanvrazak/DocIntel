@@ -5,6 +5,7 @@ import redis.asyncio as redis
 import logging
 from typing import Dict, List
 from fastapi import WebSocket, WebSocketDisconnect
+from backend.app.services.metrics import inc_active_ws_connections, dec_active_ws_connections
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class ConnectionManager:
         if doc_id not in self.active_connections:
             self.active_connections[doc_id] = []
         self.active_connections[doc_id].append(websocket)
+        inc_active_ws_connections()
         logger.info("Client %s connected for doc_id: %s", client_ip, doc_id)
         return True
 
@@ -49,6 +51,7 @@ class ConnectionManager:
             self.active_connections[doc_id].remove(websocket)
             count = self.client_connection_count.get(client_ip, 1)
             self.client_connection_count[client_ip] = max(0, count - 1)
+            dec_active_ws_connections()
             logger.info("Client %s disconnected for doc_id: %s", client_ip, doc_id)
             if not self.active_connections[doc_id]:
                 if doc_id in self.listening_tasks:

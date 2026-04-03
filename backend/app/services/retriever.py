@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import litellm
 from backend.app.models.document import Chunk
 from backend.app.services.embeddings import generate_embeddings
+from backend.app.db.session import async_session as _session_factory
 
 # Point to LiteLLM Proxy
 LITELLM_PROXY_URL = os.getenv("LITELLM_PROXY_URL", "http://litellm:4000")
@@ -174,22 +175,27 @@ class HybridRetriever:
         """
         # 1. Generate multi-queries
         queries = await self.generate_multi_queries(query_text)
-        
-        # 2. Generate embeddings for all queries at once
+
+        # 2. Start embedding all query variations in a background thread immediately
+        #    so the DB work below overlaps with the Ollama HTTP call.
         embedding_task = asyncio.to_thread(generate_embeddings, queries)
-        
-        # 3. Perform searches sequentially (AsyncSession is not concurrent-safe)
+
+        # 3. Sparse searches run on self.session (sequential — session not concurrent-safe)
         sparse_results_list = []
         for q in queries:
             res = await self.sparse_search(q, top_k=20, document_ids=document_ids)
             sparse_results_list.append(res)
-        
+
+        # 4. Wait for embeddings (likely already done while sparse searches ran)
         embeddings = await embedding_task
-        
-        dense_results_list = []
-        for emb in embeddings:
-            res = await self.dense_search(emb, top_k=20, document_ids=document_ids)
-            dense_results_list.append(res)
+
+        # 5. Dense searches: each needs its own session so they can run concurrently
+        async def _dense_with_session(emb: List[float]) -> List[Dict[str, Any]]:
+            async with _session_factory() as session:
+                retriever = HybridRetriever(session)
+                return await retriever.dense_search(emb, top_k=20, document_ids=document_ids)
+
+        dense_results_list = await asyncio.gather(*[_dense_with_session(emb) for emb in embeddings])
 
         # 6. Apply RRF Fusion
         rrf_scores: Dict[uuid.UUID, float] = {}

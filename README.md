@@ -78,6 +78,7 @@ docker compose up --build
 | `FAITHFULNESS_THRESHOLD` | `0.8` | Minimum faithfulness score to pass validation |
 | `VALIDATOR_MAX_RETRIES` | `3` | Maximum self-correction retries |
 | `RETRIEVAL_CACHE_TTL` | `300` | RAG result cache TTL in seconds |
+| `MAX_CONTEXT_CHARS` | `200000` | Max characters sent as LLM context (~50k tokens) |
 
 ## API Reference
 
@@ -93,6 +94,7 @@ Key endpoints:
 | `DELETE` | `/api/documents/{id}` | Delete a document |
 | `POST` | `/api/documents/{id}/reprocess` | Re-trigger ingestion |
 | `GET` | `/health` | Liveness check (DB + Redis) |
+| `GET` | `/metrics` | Prometheus metrics (scrape endpoint) |
 
 ## Development
 

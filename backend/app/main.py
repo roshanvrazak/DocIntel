@@ -1,6 +1,7 @@
 import os
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from backend.app.api.dependencies.limiter import limiter
@@ -17,6 +18,7 @@ from backend.app.api.routes.upload import router as upload_router
 from backend.app.api.routes.chat import router as chat_router
 from backend.app.api.routes.documents import router as documents_router
 from backend.app.api.websocket.progress import progress_websocket
+from backend.app.services.metrics import metrics_response
 
 # --- Tracing ---
 PHOENIX_ENDPOINT = os.getenv("PHOENIX_ENDPOINT", "http://phoenix:4317")
@@ -67,6 +69,13 @@ app.include_router(documents_router)
 @app.websocket("/ws/progress/{doc_id}")
 async def websocket_endpoint(websocket: WebSocket, doc_id: str):
     await progress_websocket(websocket, doc_id)
+
+
+@app.get("/metrics", include_in_schema=False)
+async def prometheus_metrics():
+    """Prometheus-format metrics for scraping by a Prometheus server."""
+    body, content_type = metrics_response()
+    return Response(content=body, media_type=content_type)
 
 
 @app.get("/")
