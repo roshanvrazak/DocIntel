@@ -1,5 +1,6 @@
 import os
 import uuid
+import asyncio
 import logging
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,11 +50,19 @@ async def upload_document(
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     file_path = os.path.join(UPLOAD_DIR, f"{doc_id}_{safe_filename}")
-    with open(file_path, "wb") as buffer:
-        buffer.write(content)
 
-    process_document.delay(str(doc_id))
-    inc_documents_processed("success")
-    inc_celery_task("process_document", "dispatched")
+    def _write(path: str, data: bytes) -> None:
+        with open(path, "wb") as fh:
+            fh.write(data)
+
+    await asyncio.to_thread(_write, file_path, content)
+
+    try:
+        process_document.delay(str(doc_id))
+        inc_celery_task("process_document", "dispatched")
+        inc_documents_processed("success")
+    except Exception:
+        logger.error("Failed to dispatch Celery task for doc %s", doc_id, exc_info=True)
+        inc_documents_processed("error")
 
     return {"id": str(doc_id), "filename": file.filename, "status": "uploaded"}

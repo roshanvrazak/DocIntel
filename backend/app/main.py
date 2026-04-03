@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from slowapi import _rate_limit_exceeded_handler
@@ -14,6 +14,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from openinference.instrumentation.langchain import LangChainInstrumentor
 from openinference.instrumentation.litellm import LiteLLMInstrumentor
 
+from backend.app.api.dependencies.auth import verify_api_key
 from backend.app.api.routes.upload import router as upload_router
 from backend.app.api.routes.chat import router as chat_router
 from backend.app.api.routes.documents import router as documents_router
@@ -71,7 +72,7 @@ async def websocket_endpoint(websocket: WebSocket, doc_id: str):
     await progress_websocket(websocket, doc_id)
 
 
-@app.get("/metrics", include_in_schema=False)
+@app.get("/metrics", include_in_schema=False, dependencies=[Depends(verify_api_key)])
 async def prometheus_metrics():
     """Prometheus-format metrics for scraping by a Prometheus server."""
     body, content_type = metrics_response()

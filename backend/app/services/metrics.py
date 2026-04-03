@@ -57,7 +57,7 @@ celery_tasks = Counter(
 retrieval_chunks = Histogram(
     "docintel_retrieval_chunks_returned",
     "Number of chunks returned by hybrid_search per query",
-    buckets=[0, 1, 2, 3, 5, 8, 10, 15, 20],
+    buckets=[1, 2, 3, 5, 8, 10, 15, 20],
     registry=registry,
 )
 

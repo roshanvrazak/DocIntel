@@ -1,18 +1,15 @@
 import asyncio
 import uuid
-import os
 import json
 import logging
 from typing import List, Dict, Any, Optional
-from sqlalchemy import select, func, desc, ColumnElement
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import litellm
 from backend.app.models.document import Chunk
 from backend.app.services.embeddings import generate_embeddings
 from backend.app.db.session import async_session as _session_factory
-
-# Point to LiteLLM Proxy
-LITELLM_PROXY_URL = os.getenv("LITELLM_PROXY_URL", "http://litellm:4000")
+from backend.app.config import LITELLM_PROXY_URL, LITELLM_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +29,7 @@ class HybridRetriever:
                 model="gemini/gemini-1.5-flash",
                 messages=[{"role": "user", "content": prompt}],
                 api_base=LITELLM_PROXY_URL,
-                api_key="sk-dummy",
+                api_key=LITELLM_API_KEY,
                 timeout=10,
                 max_tokens=150
             )
@@ -78,7 +75,7 @@ class HybridRetriever:
                 model="gemini/gemini-1.5-flash",  # Downgraded from Pro — scoring doesn't need Pro
                 messages=[{"role": "user", "content": prompt}],
                 api_base=LITELLM_PROXY_URL,
-                api_key="sk-dummy",
+                api_key=LITELLM_API_KEY,
                 timeout=30,
                 max_tokens=500,
                 response_format={"type": "json_object"}
@@ -104,7 +101,14 @@ class HybridRetriever:
                 return results[:top_n]
 
             # Map scores back to results
-            scores_map = {str(item["id"]): float(item["score"]) for item in scores_list if "id" in item and "score" in item}
+            scores_map: Dict[str, float] = {}
+            for item in scores_list:
+                if "id" not in item or "score" not in item:
+                    continue
+                try:
+                    scores_map[str(item["id"])] = float(item["score"])
+                except (ValueError, TypeError):
+                    logger.warning("Rerank: non-numeric score for chunk %s: %r", item.get("id"), item.get("score"))
             
             for res in candidates:
                 res["rerank_score"] = scores_map.get(str(res["chunk"].id), 0.0)
@@ -125,15 +129,11 @@ class HybridRetriever:
         # Similarity = 1 - cosine_distance
         distance_expr = Chunk.embedding.cosine_distance(query_embedding)
         score_expr = (1 - distance_expr).label("score")
-        
-        stmt = (
-            select(Chunk, score_expr)
-            .order_by(distance_expr)
-            .limit(top_k)
-        )
-        
+
+        stmt = select(Chunk, score_expr)
         if document_ids:
             stmt = stmt.where(Chunk.document_id.in_(document_ids))
+        stmt = stmt.order_by(distance_expr).limit(top_k)
             
         result = await self.session.execute(stmt)
         # Using a list comprehension to unpack the Row objects
@@ -145,16 +145,11 @@ class HybridRetriever:
         """
         query = func.plainto_tsquery("english", query_text)
         score_expr = func.ts_rank(Chunk.search_vector, query).label("score")
-        
-        stmt = (
-            select(Chunk, score_expr)
-            .where(Chunk.search_vector.op("@@")(query))
-            .order_by(score_expr.desc())
-            .limit(top_k)
-        )
-        
+
+        stmt = select(Chunk, score_expr).where(Chunk.search_vector.op("@@")(query))
         if document_ids:
             stmt = stmt.where(Chunk.document_id.in_(document_ids))
+        stmt = stmt.order_by(score_expr.desc()).limit(top_k)
             
         result = await self.session.execute(stmt)
         return [{"chunk": row[0], "score": float(row[1])} for row in result.all()]

@@ -14,6 +14,9 @@ VALIDATOR_MAX_RETRIES = int(os.getenv("VALIDATOR_MAX_RETRIES", "3"))
 
 # --- LLM ---
 LITELLM_PROXY_URL = os.getenv("LITELLM_PROXY_URL", "http://litellm:4000")
+# API key forwarded to LiteLLM proxy. The proxy validates this against its own
+# configured keys. Set to a non-empty value matching the proxy's master_key.
+LITELLM_API_KEY = os.getenv("LITELLM_API_KEY", "sk-dummy")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
 # Maximum characters sent as context to any LLM call.

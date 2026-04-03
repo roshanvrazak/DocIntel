@@ -26,30 +26,33 @@ def estimate_tokens(text: str) -> int:
 
 def truncate_context(
     chunks: List[Dict[str, Any]],
-    prefix: str = "",
+    prefix_chars: int = 0,
     max_chars: int = MAX_CONTEXT_CHARS,
 ) -> tuple[List[Dict[str, Any]], bool]:
     """
     Return the largest prefix of *chunks* whose combined character count
-    (including *prefix* overhead) fits within *max_chars*.
+    (including *prefix_chars* fixed overhead) fits within *max_chars*.
 
-    Chunks are assumed to be ordered by relevance (highest first). Lower-ranked
-    chunks are dropped first.
+    Args:
+        chunks: Ordered by relevance (highest first). Lower-ranked chunks are
+            dropped first.
+        prefix_chars: Character count of the fixed prompt overhead (system
+            prompt + query + scaffolding) that consumes part of the budget.
+        max_chars: Total character budget for the full prompt context.
 
     Returns:
         (kept_chunks, was_truncated)
     """
-    budget = max_chars - len(prefix)
+    budget = max_chars - prefix_chars
     if budget <= 0:
-        logger.warning("Context prefix alone exceeds MAX_CONTEXT_CHARS=%d; returning empty chunks", max_chars)
+        logger.warning("Prompt overhead (%d chars) alone exceeds MAX_CONTEXT_CHARS=%d", prefix_chars, max_chars)
         return [], True
 
     kept: List[Dict[str, Any]] = []
     used = 0
     for chunk in chunks:
         content = chunk.get("content", "")
-        # +2 for separator overhead ("\n\n" between chunks)
-        chunk_chars = len(content) + 2
+        chunk_chars = len(content) + 2  # +2 for "\n\n" separator
         if used + chunk_chars > budget:
             break
         kept.append(chunk)
@@ -57,9 +60,10 @@ def truncate_context(
 
     was_truncated = len(kept) < len(chunks)
     if was_truncated:
+        total_tokens = (prefix_chars + used) // _CHARS_PER_TOKEN
         logger.info(
             "Context truncated: kept %d/%d chunks (%d chars, est. %d tokens) within budget of %d chars",
-            len(kept), len(chunks), used, estimate_tokens(prefix) + used // _CHARS_PER_TOKEN, max_chars,
+            len(kept), len(chunks), used, total_tokens, max_chars,
         )
     return kept, was_truncated
 

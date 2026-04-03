@@ -79,6 +79,8 @@ docker compose up --build
 | `VALIDATOR_MAX_RETRIES` | `3` | Maximum self-correction retries |
 | `RETRIEVAL_CACHE_TTL` | `300` | RAG result cache TTL in seconds |
 | `MAX_CONTEXT_CHARS` | `200000` | Max characters sent as LLM context (~50k tokens) |
+| `LITELLM_API_KEY` | `sk-dummy` | API key forwarded to the LiteLLM proxy (`master_key`) |
+| `LITELLM_PROXY_URL` | `http://litellm:4000` | LiteLLM proxy base URL |
 
 ## API Reference
 

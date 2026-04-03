@@ -2,34 +2,28 @@
 WebSocket integration tests for /ws/progress/{doc_id}.
 
 Tests:
-- Auth rejection (code 4001) when API_KEY env is set and key is wrong/missing
+- Auth rejection (code 4001) when API_KEY is set and key is wrong/missing
 - Auth acceptance when correct key is provided
+- Invalid doc_id (non-UUID) rejected with code 4003
 - Connection limit enforcement (code 4029)
 - Broadcast: messages published to Redis reach connected clients
 
-Note: The module-level _API_KEY and MAX_WS_CONNECTIONS_PER_CLIENT are read at
-import time in progress.py, so we reload the module after patching env vars to
-pick up new values.
+Auth tests use monkeypatch.setattr on the already-imported ws module object so
+that main.py's reference to progress_websocket (captured at import time) reads
+the patched value — module reload does not affect the reference held by the
+FastAPI route closure.
 """
-import importlib
 import json
-import os
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
+import backend.app.api.websocket.progress as ws_mod
 from backend.app.main import app
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _reload_ws_module():
-    """Reload the WebSocket module so env-var globals are refreshed."""
-    import backend.app.api.websocket.progress as ws_mod
-    importlib.reload(ws_mod)
-    return ws_mod
+# Use a real UUID for tests that should pass doc_id validation
+VALID_DOC_ID = "00000000-0000-0000-0000-000000000001"
+INVALID_DOC_ID = "not-a-uuid"
 
 
 # ---------------------------------------------------------------------------
@@ -38,49 +32,47 @@ def _reload_ws_module():
 
 class TestWebSocketAuth:
     def test_no_auth_required_when_api_key_unset(self, monkeypatch):
-        """When API_KEY is not set, any connection should be accepted."""
-        monkeypatch.delenv("API_KEY", raising=False)
-        _reload_ws_module()
+        """When API_KEY is not set, any valid UUID connection should be accepted."""
+        monkeypatch.setattr(ws_mod, "_API_KEY", None)
 
         with TestClient(app) as client:
-            with client.websocket_connect("/ws/progress/test-doc-id") as ws:
-                # Connection accepted — we can receive; close gracefully
-                pass  # no assert needed; not raising == accepted
+            with client.websocket_connect(f"/ws/progress/{VALID_DOC_ID}") as ws:
+                pass  # not raising == accepted
 
     def test_connection_rejected_with_wrong_key(self, monkeypatch):
-        """Wrong API key must close the socket with code 4001."""
-        monkeypatch.setenv("API_KEY", "correct-secret")
-        _reload_ws_module()
+        """Wrong API key must close the socket (code 4001)."""
+        monkeypatch.setattr(ws_mod, "_API_KEY", "correct-secret")
 
         with TestClient(app) as client:
             with pytest.raises(Exception):
-                # The server closes the connection — TestClient raises on rejected WS
-                with client.websocket_connect("/ws/progress/doc-auth?api_key=wrong"):
+                with client.websocket_connect(f"/ws/progress/{VALID_DOC_ID}?api_key=wrong"):
                     pass
 
     def test_connection_rejected_with_missing_key(self, monkeypatch):
         """No api_key query param when API_KEY is required → rejected."""
-        monkeypatch.setenv("API_KEY", "correct-secret")
-        _reload_ws_module()
+        monkeypatch.setattr(ws_mod, "_API_KEY", "correct-secret")
 
         with TestClient(app) as client:
             with pytest.raises(Exception):
-                with client.websocket_connect("/ws/progress/doc-auth"):
+                with client.websocket_connect(f"/ws/progress/{VALID_DOC_ID}"):
                     pass
 
     def test_connection_accepted_with_correct_key(self, monkeypatch):
         """Correct api_key in query string → connection accepted."""
-        monkeypatch.setenv("API_KEY", "correct-secret")
-        _reload_ws_module()
+        monkeypatch.setattr(ws_mod, "_API_KEY", "correct-secret")
 
         with TestClient(app) as client:
-            # Should not raise
-            with client.websocket_connect("/ws/progress/doc-auth?api_key=correct-secret"):
+            with client.websocket_connect(f"/ws/progress/{VALID_DOC_ID}?api_key=correct-secret"):
                 pass
 
-    def teardown_method(self):
-        os.environ.pop("API_KEY", None)
-        _reload_ws_module()
+    def test_invalid_doc_id_rejected(self, monkeypatch):
+        """Non-UUID doc_id must be rejected before auth check (code 4003)."""
+        monkeypatch.setattr(ws_mod, "_API_KEY", None)
+
+        with TestClient(app) as client:
+            with pytest.raises(Exception):
+                with client.websocket_connect(f"/ws/progress/{INVALID_DOC_ID}"):
+                    pass
 
 
 # ---------------------------------------------------------------------------
@@ -88,98 +80,72 @@ class TestWebSocketAuth:
 # ---------------------------------------------------------------------------
 
 class TestWebSocketConnectionLimit:
+    def setup_method(self):
+        ws_mod.manager.active_connections.clear()
+        ws_mod.manager.client_connection_count.clear()
+
+    def teardown_method(self):
+        ws_mod.manager.active_connections.clear()
+        ws_mod.manager.client_connection_count.clear()
+
     def test_connection_limit_enforced(self, monkeypatch):
         """
         When MAX_WS_CONNECTIONS_PER_CLIENT=1, a second connection from the
         same client IP should be rejected with code 4029.
         """
-        monkeypatch.delenv("API_KEY", raising=False)
-        monkeypatch.setenv("MAX_WS_CONNECTIONS_PER_CLIENT", "1")
-        ws_mod = _reload_ws_module()
+        monkeypatch.setattr(ws_mod, "_API_KEY", None)
+        monkeypatch.setattr(ws_mod, "MAX_WS_CONNECTIONS_PER_CLIENT", 1)
 
-        # Reset the manager's state so previous tests don't pollute
-        ws_mod.manager.active_connections.clear()
-        ws_mod.manager.client_connection_count.clear()
-
+        other_uuid = "00000000-0000-0000-0000-000000000002"
         with TestClient(app) as client:
-            # First connection — should be accepted
-            with client.websocket_connect("/ws/progress/doc-limit-1"):
-                # While first is open, second should be rejected
+            with client.websocket_connect(f"/ws/progress/{VALID_DOC_ID}"):
                 with pytest.raises(Exception):
-                    with client.websocket_connect("/ws/progress/doc-limit-2"):
+                    with client.websocket_connect(f"/ws/progress/{other_uuid}"):
                         pass
-
-    def teardown_method(self):
-        os.environ.pop("MAX_WS_CONNECTIONS_PER_CLIENT", None)
-        import backend.app.api.websocket.progress as ws_mod
-        ws_mod.manager.active_connections.clear()
-        ws_mod.manager.client_connection_count.clear()
-        _reload_ws_module()
 
 
 # ---------------------------------------------------------------------------
-# Broadcast tests (mocked Redis)
+# Broadcast tests (mocked WebSocket)
 # ---------------------------------------------------------------------------
 
 class TestWebSocketBroadcast:
-    def test_broadcast_sends_message_to_connected_client(self):
-        """
-        Directly exercise ConnectionManager.broadcast() with a mock WebSocket,
-        verifying send_text is called with the serialised message.
-        """
-        import asyncio
-        import backend.app.api.websocket.progress as ws_mod
+    def teardown_method(self):
+        ws_mod.manager.active_connections.clear()
 
-        doc_id = "broadcast-doc"
+    def test_broadcast_sends_message_to_connected_client(self):
+        """broadcast() calls send_text with the serialised message."""
+        import asyncio
+
+        doc_id = VALID_DOC_ID
         message = {"status": "processing", "progress": 42}
 
-        # Build a mock WebSocket with an async send_text
         mock_ws = MagicMock()
         mock_ws.send_text = AsyncMock()
         mock_ws.client = MagicMock()
         mock_ws.client.host = "127.0.0.1"
 
-        # Manually register the mock WebSocket
         ws_mod.manager.active_connections[doc_id] = [mock_ws]
-
-        # Run broadcast
         asyncio.run(ws_mod.manager.broadcast(doc_id, message))
 
         mock_ws.send_text.assert_called_once_with(json.dumps(message))
 
-        # Cleanup
-        ws_mod.manager.active_connections.pop(doc_id, None)
-
     def test_broadcast_removes_broken_connections(self):
-        """
-        If send_text raises (dead client), the connection is removed and no
-        exception propagates.
-        """
+        """If send_text raises, the dead connection is removed silently."""
         import asyncio
-        import backend.app.api.websocket.progress as ws_mod
 
-        doc_id = "broadcast-error-doc"
-
+        doc_id = "00000000-0000-0000-0000-000000000003"
         mock_ws = MagicMock()
         mock_ws.send_text = AsyncMock(side_effect=RuntimeError("connection dead"))
         mock_ws.client = MagicMock()
         mock_ws.client.host = "127.0.0.1"
 
         ws_mod.manager.active_connections[doc_id] = [mock_ws]
-
-        # Should not raise
         asyncio.run(ws_mod.manager.broadcast(doc_id, {"status": "done"}))
 
-        # Connection should have been removed
-        assert doc_id not in ws_mod.manager.active_connections or \
-               mock_ws not in ws_mod.manager.active_connections.get(doc_id, [])
-
-        ws_mod.manager.active_connections.pop(doc_id, None)
+        remaining = ws_mod.manager.active_connections.get(doc_id, [])
+        assert mock_ws not in remaining
 
     def test_broadcast_noop_for_unknown_doc_id(self):
         """Broadcast to a doc_id with no listeners silently does nothing."""
         import asyncio
-        import backend.app.api.websocket.progress as ws_mod
-
-        # Should not raise
-        asyncio.run(ws_mod.manager.broadcast("no-such-doc", {"ping": True}))
+        asyncio.run(ws_mod.manager.broadcast("00000000-0000-0000-0000-000000000099", {"ping": True}))

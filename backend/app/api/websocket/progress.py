@@ -1,13 +1,13 @@
 import asyncio
 import json
 import os
+import uuid as _uuid
 import redis.asyncio as redis
 import logging
 from typing import Dict, List
 from fastapi import WebSocket, WebSocketDisconnect
 from backend.app.services.metrics import inc_active_ws_connections, dec_active_ws_connections
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
@@ -18,32 +18,36 @@ MAX_WS_CONNECTIONS_PER_CLIENT = int(os.getenv("MAX_WS_CONNECTIONS_PER_CLIENT", "
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, List[WebSocket]] = {}
-        # Track connection count per client IP
         self.client_connection_count: Dict[str, int] = {}
         self.redis_client = redis.from_url(REDIS_URL)
         self.listening_tasks: Dict[str, asyncio.Task] = {}
+        self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket, doc_id: str) -> bool:
         client_ip = websocket.client.host if websocket.client else "unknown"
-        current_count = self.client_connection_count.get(client_ip, 0)
-        if current_count >= MAX_WS_CONNECTIONS_PER_CLIENT:
-            await websocket.close(code=4029)
-            logger.warning(
-                "WebSocket connection limit reached for client %s (doc_id: %s)", client_ip, doc_id
-            )
-            return False
 
-        await websocket.accept()
-        self.client_connection_count[client_ip] = current_count + 1
-        if doc_id not in self.active_connections:
-            self.active_connections[doc_id] = []
-        self.active_connections[doc_id].append(websocket)
+        async with self._lock:
+            current_count = self.client_connection_count.get(client_ip, 0)
+            if current_count >= MAX_WS_CONNECTIONS_PER_CLIENT:
+                await websocket.close(code=4029)
+                logger.warning(
+                    "WebSocket connection limit reached for client %s (doc_id: %s)", client_ip, doc_id
+                )
+                return False
+
+            await websocket.accept()
+            self.client_connection_count[client_ip] = current_count + 1
+            if doc_id not in self.active_connections:
+                self.active_connections[doc_id] = []
+            self.active_connections[doc_id].append(websocket)
+
+            # Start the Redis listener for this doc_id if not already running
+            if doc_id not in self.listening_tasks:
+                self.listening_tasks[doc_id] = asyncio.create_task(self.listen_to_redis(doc_id))
+
         inc_active_ws_connections()
         logger.info("Client %s connected for doc_id: %s", client_ip, doc_id)
         return True
-
-        if doc_id not in self.listening_tasks:
-            self.listening_tasks[doc_id] = asyncio.create_task(self.listen_to_redis(doc_id))
 
     def disconnect(self, websocket: WebSocket, doc_id: str):
         client_ip = websocket.client.host if websocket.client else "unknown"
@@ -60,15 +64,15 @@ class ConnectionManager:
                 del self.active_connections[doc_id]
 
     async def broadcast(self, doc_id: str, message: dict):
-        if doc_id in self.active_connections:
-            to_remove = []
-            for connection in self.active_connections[doc_id]:
-                try:
-                    await connection.send_text(json.dumps(message))
-                except Exception:
-                    to_remove.append(connection)
-            for connection in to_remove:
-                self.disconnect(connection, doc_id)
+        connections = list(self.active_connections.get(doc_id, []))
+        to_remove = []
+        for connection in connections:
+            try:
+                await connection.send_text(json.dumps(message))
+            except Exception:
+                to_remove.append(connection)
+        for connection in to_remove:
+            self.disconnect(connection, doc_id)
 
     async def listen_to_redis(self, doc_id: str):
         pubsub = self.redis_client.pubsub()
@@ -83,7 +87,7 @@ class ConnectionManager:
             logger.info("Stopped listening to Redis for doc_id: %s", doc_id)
             await pubsub.unsubscribe(f"progress:{doc_id}")
         except Exception as e:
-            logger.error("Error listening to Redis for doc_id %s: %s", doc_id, str(e))
+            logger.error("Error listening to Redis for doc_id %s: %s", doc_id, e)
         finally:
             await pubsub.close()
 
@@ -92,6 +96,14 @@ manager = ConnectionManager()
 
 
 async def progress_websocket(websocket: WebSocket, doc_id: str):
+    # Validate doc_id is a well-formed UUID to prevent arbitrary Redis channel subscription
+    try:
+        _uuid.UUID(doc_id)
+    except ValueError:
+        await websocket.close(code=4003)
+        logger.warning("WebSocket rejected for invalid doc_id: %s", doc_id)
+        return
+
     # Validate API key from query param (browser WS doesn't support custom headers)
     if _API_KEY:
         provided_key = websocket.query_params.get("api_key")

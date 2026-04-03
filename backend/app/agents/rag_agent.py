@@ -8,7 +8,7 @@ from .state import DocIntelState
 from backend.app.services.retriever import HybridRetriever
 from backend.app.models.document import Document
 from backend.app.db.session import async_session
-from backend.app.config import LITELLM_PROXY_URL, REDIS_URL, RETRIEVAL_CACHE_TTL, RETRIEVER_TOP_K
+from backend.app.config import LITELLM_PROXY_URL, LITELLM_API_KEY, REDIS_URL, RETRIEVAL_CACHE_TTL, RETRIEVER_TOP_K
 from backend.app.services.context_manager import truncate_context
 from backend.app.services.metrics import observe_retrieval_chunks
 import litellm
@@ -43,6 +43,9 @@ async def rag_node(state: DocIntelState) -> DocIntelState:
     except Exception as e:
         logger.warning("Cache read failed: %s", e)
 
+    draft_response: str = "I encountered an error while analyzing the documents. Please try again."
+    retrieved_chunks: list = []
+
     try:
         async with async_session() as session:
             retriever = HybridRetriever(session)
@@ -75,7 +78,7 @@ async def rag_node(state: DocIntelState) -> DocIntelState:
 
         # Enforce context budget before sending to LLM
         prefix_overhead = len(system_prompt) + len(query) + 50  # prompt scaffolding chars
-        retrieved_chunks, was_truncated = truncate_context(all_chunks_meta, prefix=" " * prefix_overhead)
+        retrieved_chunks, was_truncated = truncate_context(all_chunks_meta, prefix_chars=prefix_overhead)
         observe_retrieval_chunks(len(retrieved_chunks))
 
         context_parts = [
@@ -93,7 +96,7 @@ async def rag_node(state: DocIntelState) -> DocIntelState:
                 {"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {query}"},
             ],
             api_base=LITELLM_PROXY_URL,
-            api_key="sk-dummy",
+            api_key=LITELLM_API_KEY,
             temperature=0.2,
             max_tokens=2000,
         )
@@ -103,9 +106,8 @@ async def rag_node(state: DocIntelState) -> DocIntelState:
             draft_response += "\n\n[Response truncated. Try asking a more specific question.]"
 
     except Exception as e:
-        logger.error("Error in rag_node: %s", str(e), exc_info=True)
-        draft_response = "I encountered an error while analyzing the documents. Please try again."
-        retrieved_chunks = []
+        logger.error("Error in rag_node: %s", e, exc_info=True)
+        # draft_response and retrieved_chunks already hold safe sentinel defaults
 
     result = {"retrieved_chunks": retrieved_chunks, "draft_response": draft_response}
 
